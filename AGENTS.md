@@ -254,9 +254,9 @@ Return HTTP Response (200, 201, 400, 401, 403, 404, 409, 422, 500)
 
 ### During Development
 
-- Work on one logical task at a time.
-- Keep changes scoped to the current task.
-- Do not include unrelated refactoring, formatting, or cleanup in the same task.
+* Work on one logical task at a time.
+* Keep changes scoped to the current task.
+* Do not include unrelated refactoring, formatting, or cleanup in the same task.
 
 ### Before Committing
 
@@ -264,32 +264,44 @@ Return HTTP Response (200, 201, 400, 401, 403, 404, 409, 422, 500)
 2. Review `git status` and `git diff`.
 3. Verify that only files related to the current task are included.
 4. Verify that no secrets, environment files, generated artifacts, or unrelated files are staged.
+5. Before creating any commit, always ask the user which branch name should be used for the commit.
+6. Do not create, switch, rename, or otherwise choose a branch for the commit until the user explicitly provides or confirms the branch name.
+
+### Branch Selection
+
+* The branch name must never be assumed.
+* Always ask the user for the branch name before every commit, even if the current branch already appears appropriate.
+* If the requested branch does not exist, ask whether it should be created before creating it.
+* Do not automatically create a branch unless the user explicitly confirms the branch name and creation.
+* Do not switch branches if doing so could affect unrelated uncommitted changes. Preserve those changes and report the situation instead.
 
 ### Commit Guidelines
 
 Each commit must:
 
-- Represent one logical task
-- Contain only changes required for that task
-- Use a concise commit message describing the completed change
-- Avoid bundling unrelated changes
+* Represent one logical task
+* Contain only changes required for that task
+* Use a concise commit message describing the completed change
+* Avoid bundling unrelated changes
+* Be created only after the user has explicitly confirmed the branch name for that commit
 
 ### Do NOT Commit
 
-- Sensitive files: `.env`, `.env.local`, `.env.*`
-- Generated or dependency directories: `node_modules/`, `.next/`, `dist/`, `coverage/` (unless explicitly tracked)
-- Unrelated or uncommitted user changes
+* Sensitive files: `.env`, `.env.local`, `.env.*`
+* Generated or dependency directories: `node_modules/`, `.next/`, `dist/`, `coverage/` (unless explicitly tracked)
+* Unrelated or uncommitted user changes
 
 ### Forbidden Operations
 
 Do not:
 
-- Push to remote unless explicitly instructed
-- Force push
-- Rewrite published history
-- Run destructive commands: `git reset --hard`, `git clean -fd`
-- Use `git commit --amend`, interactive rebase, or history-rewriting operations unless explicitly requested
-- Delete or overwrite unrelated uncommitted user changes
+* Push to remote unless explicitly instructed
+* Force push
+* Rewrite published history
+* Run destructive commands: `git reset --hard`, `git clean -fd`
+* Use `git commit --amend`, interactive rebase, or history-rewriting operations unless explicitly requested
+* Delete or overwrite unrelated uncommitted user changes
+* Automatically choose, create, rename, or switch to a branch without explicit user confirmation
 
 If unrelated uncommitted changes exist, preserve them and do not include them in the task commit.
 
@@ -301,10 +313,12 @@ If relevant tests or checks fail, do not create the completion commit unless the
 
 At the end of the task, report:
 
-- Commit hash
-- Commit message
-- Checks executed
-- Any checks that could not be executed or did not pass
+* Branch name used
+* Commit hash
+* Commit message
+* Checks executed
+* Any checks that could not be executed or did not pass
+
 
 ---
 
