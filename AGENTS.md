@@ -200,6 +200,7 @@ Return HTTP Response (200, 201, 400, 401, 403, 404, 409, 422, 500)
 - **Do NOT run** commands that expose secrets: `cat .env`, `grep ... .env`, `env`, `printenv`
 - If an environment variable is needed but not documented in `.env.example`, update `.env.example` with a safe placeholder instead
 - **Never include** real secret values in source code, logs, documentation, or responses
+- Exception: follow the auto-generated Next.js agent rule at the top of this file and narrowly inspect `node_modules/next/dist/docs/` when required for Next.js implementation.
 
 ### Dependencies & Generated Files
 
