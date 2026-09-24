@@ -47,35 +47,45 @@ This Next.js backend serves as the API server for a hackathon rideshare web appl
    - No Admin role in this iteration
 
 3. **Reservations & Shifts**
-   - 1 Shift = maximum 1 active Reservation (enforced by partial unique index)
-   - Shift status: `available` → `booked` → `completed` or `canceled`
-   - Reservation status: `pending` → `accepted` → `in_progress` → `completed` or `canceled`
-   - Passenger count must be 1–3; verify `passenger_count ≤ car_capacity` at creation
-   - Only passengers can cancel reservations; drivers cannot cancel reservations or change status
+   - One Shift can have multiple active Reservations when pickup coordinates, drop-off coordinates, and `scheduled_pickup_at` match exactly
+   - `available` means no active Reservation is assigned; `booked` means one or more active Reservations are assigned
+   - A `booked` Shift remains eligible for another matching Reservation while passenger capacity remains
+   - Do NOT create the old partial unique index that limited one active Reservation per Shift
+   - Shift status transitions: `available -> booked -> completed`, `available -> canceled`, `booked -> canceled`, and `booked -> available` when no active Reservations remain
+   - Reservation status transitions: `pending -> accepted -> in_progress -> completed`, `pending -> canceled` at the deadline, and `accepted -> pending` for re-matching after an allocation or Shift cancellation
+   - Passenger count must be 1–3
+   - `car_capacity` includes the Driver; passenger capacity is `car_capacity - 1`
+   - Remaining capacity is not stored; calculate it from active (`accepted` or `in_progress`) Reservation passenger counts
+   - `reservations.driver_id` does not exist; derive the Driver through `reservations.shift_id -> shifts.driver_id`
 
 4. **Matching Logic**
    - Matching does NOT use driver current location
-   - Matching finds shifts where: `shift.start_time ≤ reservation.scheduled_pickup_at < shift.end_time AND shift.status = 'available'`
-   - Select 1 random eligible shift and assign its driver
-   - If no eligible shift exists, reservation remains `pending` for future re-matching
-   - Use transactions and row locks to prevent concurrent assignment to same shift (see db-design.md for details)
+   - Prefer an existing `booked` Shift whose active Reservation has exactly matching pickup coordinates, drop-off coordinates, and `scheduled_pickup_at`, provided enough capacity remains
+   - If no such `booked` Shift exists, search an unused Shift with `shift.status = 'available'` and `shift.start_time <= reservation.scheduled_pickup_at < shift.end_time`
+   - Select 1 random Shift among candidates at the same priority
+   - If no eligible Shift exists, leave the Reservation `pending` for future re-matching
+   - Use a transaction and Shift row lock; recalculate capacity and matching conditions after locking
 
 5. **Shift Time Overlap**
-   - Same driver cannot have overlapping shifts
-   - Overlap rule: `existing.start_time < new.end_time AND new.start_time < existing.end_time`
-   - Application validates; DB enforces with checks and constraints
-   - Do NOT add complex Exclude Constraints or GiST indexes beyond db-design.md
+   - Shifts cannot overlap when either `driver_id` or `car_id` is the same
+   - Overlap rule: `(existing.driver_id = new.driver_id OR existing.car_id = new.car_id) AND existing.start_time < new.end_time AND new.start_time < existing.end_time`
+   - Application validates overlap; do NOT add Exclude Constraints or GiST indexes unless db-design.md is updated
+   - Whether `canceled` Shifts are excluded from overlap checks is unresolved; decide before Initial Migration
 
-6. **Cancellation**
-   - When passenger cancels accepted reservation: set reservation.status to `canceled`, shift.status to `available`
-   - Preserve `driver_id` and `shift_id` for history; do NOT set to NULL
-   - Do NOT permanently mark shifts as unusable after cancellation
+6. **Cancellation & Re-matching**
+   - Passengers may cancel an accepted allocation before the deadline; return the Reservation to `pending` and set `shift_id = NULL` for re-matching
+   - Drivers cannot cancel Reservations directly, but may cancel their own Shift before the ride starts
+   - On Shift cancellation, return its `accepted` Reservations to `pending` and set their `shift_id = NULL` in the same transaction
+   - Do not cancel an `in_progress` Reservation or Shift
+   - Previous allocation history is not stored
 
-7. **Reservation Deadline**
-   - Deadline: day before desired pickup at 18:00
-   - Reject reservations after deadline
-   - Auto-cancel `pending` reservations past deadline
-   - Timezone handling: confirm with existing code/docs; do NOT invent UTC/JST defaults
+7. **Reservation Deadline & Automatic Transitions**
+   - Deadline: 18:00 `Asia/Tokyo` on the day before desired pickup
+   - Reject new Reservations and allocation cancellations after the deadline
+   - Automatically change unmatched `pending` Reservations to `canceled` at the deadline
+   - Automatically change `accepted` to `in_progress` at `scheduled_pickup_at`
+   - Automatically complete the relevant Reservations and Shift after `shift.end_time`
+   - On completion, calculate each `fare` and store `shifts.earnings = SUM(completed reservation fares)`
 
 ---
 
@@ -327,7 +337,7 @@ At the end of the task, report:
 
 Do NOT implement without explicit user request:
 
-- Payment & pricing
+- Payment processing (fare calculation and storage still follow docs/db-design.md)
 - Admin role/dashboard
 - Rating/review system
 - Chat functionality
@@ -378,8 +388,8 @@ After each implementation task, briefly report:
 | Package Manager | npm only |
 | APIs | Route Handlers (`src/app/api/**/route.ts`) |
 | Auth | Supabase Auth email+password; verify token server-side |
-| Matching | Time-based (not location-based); random selection; transactional |
-| Shifts | Max 1 active reservation; no overlap for same driver |
+| Matching | Prefer matching booked shifts; otherwise available shifts; random within same priority; transactional |
+| Shifts | Multiple matching reservations allowed; no overlap for same driver or car |
 | Roles | passenger (default), driver only; drivers can book as passengers |
 | Validation | Runtime + TypeScript, not types alone |
 | Secrets | Environment variables only; never expose to client |
