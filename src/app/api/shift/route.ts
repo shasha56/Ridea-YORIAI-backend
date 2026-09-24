@@ -4,9 +4,10 @@ import { createSupabaseServerClient } from "@/lib/supabase-server";
 type ShiftInput = {
   start_time?: unknown;
   end_time?: unknown;
+  car_id?: unknown;
 };
 
-const shiftColumns = "id, driver_id, start_time, end_time, status, created_at";
+const shiftColumns = "id, driver_id, car_id, start_time, end_time, status, created_at";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
@@ -18,12 +19,23 @@ function getAccessToken(request: Request) {
   return match?.[1] ?? null;
 }
 
+function normalizePositiveInteger(value: unknown, fieldName: string) {
+  const normalized = typeof value === "string" ? Number(value) : value;
+  if (typeof normalized !== "number" || !Number.isInteger(normalized) || normalized <= 0) {
+    return { error: `${fieldName} must be a positive integer` } as const;
+  }
+  return { value: normalized } as const;
+}
+
 function parseShiftInput(body: unknown) {
   if (!body || typeof body !== "object") {
     return { error: "Request body must be a JSON object" } as const;
   }
 
   const input = body as ShiftInput;
+  const carId = normalizePositiveInteger(input.car_id, "car_id");
+  if ("error" in carId) return carId;
+
   if (typeof input.start_time !== "string" || typeof input.end_time !== "string") {
     return { error: "start_time and end_time are required ISO date strings" } as const;
   }
@@ -39,6 +51,7 @@ function parseShiftInput(body: unknown) {
 
   return {
     value: {
+      car_id: carId.value,
       start_time: startTime.toISOString(),
       end_time: endTime.toISOString(),
     },
@@ -90,6 +103,7 @@ async function getDriverContext(request: Request) {
 async function hasOverlappingShift(
   supabase: ReturnType<typeof createSupabaseServerClient>,
   driverId: number,
+  carId: number,
   startTime: string,
   endTime: string,
   excludedShiftId?: number,
@@ -97,7 +111,7 @@ async function hasOverlappingShift(
   let query = supabase
     .from("shifts")
     .select("id")
-    .eq("driver_id", driverId)
+    .or(`driver_id.eq.${driverId},car_id.eq.${carId}`)
     .neq("status", "canceled")
     .lt("start_time", endTime)
     .gt("end_time", startTime)
@@ -142,11 +156,12 @@ export async function POST(request: Request) {
   const overlap = await hasOverlappingShift(
     context.supabase,
     context.driverId,
+    parsed.value.car_id,
     parsed.value.start_time,
     parsed.value.end_time,
   );
   if (overlap.error) return jsonError("Failed to check shift overlap", 500);
-  if (overlap.overlaps) return jsonError("Shift time overlaps an existing shift", 409);
+  if (overlap.overlaps) return jsonError("Shift time overlaps an existing shift for the same driver or vehicle", 409);
 
   const { data, error } = await context.supabase
     .from("shifts")
@@ -193,12 +208,13 @@ export async function PATCH(request: Request) {
   const overlap = await hasOverlappingShift(
     context.supabase,
     context.driverId,
+    parsed.value.car_id,
     parsed.value.start_time,
     parsed.value.end_time,
     shiftId,
   );
   if (overlap.error) return jsonError("Failed to check shift overlap", 500);
-  if (overlap.overlaps) return jsonError("Shift time overlaps an existing shift", 409);
+  if (overlap.overlaps) return jsonError("Shift time overlaps an existing shift for the same driver or vehicle", 409);
 
   const { data, error } = await context.supabase
     .from("shifts")

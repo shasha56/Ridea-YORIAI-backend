@@ -16,7 +16,7 @@ Authorization: Bearer <access-token>
 GET /api/shift
 ```
 
-認証ユーザー自身のShiftを開始時刻順で返す。
+認証ユーザー自身のShiftを開始時刻順で返す。レスポンスには `id`、`driver_id`、`car_id`、`start_time`、`end_time`、`status`、`created_at` を含む。
 
 ### Shift登録
 
@@ -25,12 +25,13 @@ POST /api/shift
 Content-Type: application/json
 
 {
+  "car_id": 1,
   "start_time": "2026-09-23T09:00:00+09:00",
   "end_time": "2026-09-23T13:00:00+09:00"
 }
 ```
 
-同じDriverの既存Shiftと時間が重複する場合は `409` を返す。終了時刻と次の開始時刻が同じ場合は重複しない。
+`car_id` は必須で、同じDriverまたは同じCarに重複する時間帯がある場合は `409` を返す。終了時刻と次の開始時刻が同じ場合は重複と見なさない。
 
 ### Shift変更
 
@@ -39,6 +40,7 @@ PATCH /api/shift?id=123
 Content-Type: application/json
 
 {
+  "car_id": 1,
   "start_time": "2026-09-23T10:00:00+09:00",
   "end_time": "2026-09-23T14:00:00+09:00"
 }
