@@ -8,6 +8,8 @@ Supabase PostgreSQLを使用するライドシェアWebアプリの暫定DB設�
 
 日時は`timestamptz`で保存する。業務上の日付・時刻は日本時間（`Asia/Tokyo`）で判定する。
 
+日時は`timestamptz`で保存する。業務上の日付・時刻は日本時間（`Asia/Tokyo`）で判定する。
+
 ## エンティティ
 
 ### auth.users（Supabase Auth管理）
@@ -87,7 +89,7 @@ Passengerの1回の乗車予約を管理する。Reservationは最大1件のShif
 | `start_time` | `timestamptz` | NOT NULL                                  |
 | `end_time`   | `timestamptz` | NOT NULL、`start_time < end_time`         |
 | `status`     | `text`        | NOT NULL、DEFAULT`'available'`、状態CHECK |
-| `earnings`   | `numeric`     | NULL可、Shift完了時に確定する合計運賃     |
+| `earnings`   | `numeric`     | NULL可、Shift完了時に確定する合計運賃、CHECK (`earnings IS NULL OR earnings >= 0`) |
 | `created_at` | `timestamptz` | NOT NULL、作成日時                        |
 
 `status`は`available`、`booked`、`completed`、`canceled`のいずれかとする。`available`は有効なReservationがない未使用Shift、`booked`は1件以上の有効なReservationがあるShiftを表す。`booked`でも残席があれば同一便を追加できる。満席かどうかは残席計算で判定する。`completed`は乗車完了、`canceled`はDriverが取り消したShiftを表す。`earnings`はShift完了時に、そのShiftに紐づく完了済みReservationの`fare`合計を保存する。完了前およびキャンセル時はNULLとする。
@@ -108,7 +110,7 @@ Passengerの1回の乗車予約を管理する。Reservationは最大1件のShif
 | `end_latitude`        | `numeric`     | NOT NULL、Geocoding後の降車地点緯度           |
 | `end_longitude`       | `numeric`     | NOT NULL、Geocoding後の降車地点経度           |
 | `scheduled_pickup_at` | `timestamptz` | NOT NULL、Passengerが希望する乗車日時         |
-| `fare`                | `numeric`     | NULL可、乗車完了時に確定する運賃              |
+| `fare`                | `numeric`     | NULL可、乗車完了時に確定する運賃、CHECK (`fare IS NULL OR fare >= 0`) |
 | `created_at`          | `timestamptz` | NOT NULL、作成日時                            |
 | `updated_at`          | `timestamptz` | NOT NULL、更新日時                            |
 
@@ -187,7 +189,8 @@ new_reservation.passenger_count
 既存便に候補がない場合、次を満たす`available` Shiftからランダムに1件選ぶ。
 
 ```text
-shift.start_time <= reservation.scheduled_pickup_at
+shift.status = 'available'
+AND shift.start_time <= reservation.scheduled_pickup_at
 AND reservation.scheduled_pickup_at < shift.end_time
 AND reservation.passenger_count <= car.car_capacity - 1
 ```
@@ -204,14 +207,18 @@ AND reservation.passenger_count <= car.car_capacity - 1
 
 ### 時間の重複
 
-同一Driverおよび同一Carについて、時間帯が重複するShiftを禁止する。
+同一Driver、または同一Carを使用するShiftについて、時間帯の重複を禁止する。
 
 ```text
-existing.start_time < new.end_time
+(
+  existing.driver_id = new.driver_id
+  OR existing.car_id = new.car_id
+)
+AND existing.start_time < new.end_time
 AND new.start_time < existing.end_time
 ```
 
-終了時刻と次の開始時刻が一致する場合は許可する。今回はShift登録時にアプリケーション側で検証し、Exclude Constraint（GiST）は導入しない。
+終了時刻と次の開始時刻が一致する場合は許可する。今回はShift登録時にアプリケーション側で検証し、Exclude Constraint（GiST）は導入しない。`canceled` Shiftを重複判定から除外するかは未確定であり、Initial Migration作成前に決定する。
 
 ## 競合対策
 
@@ -235,7 +242,8 @@ AND new.start_time < existing.end_time
 - PK、FK、NOT NULL、Roleとstatusの許可値
 - `drivers.user_id`と`cars.car_number`のUNIQUE制約
 - `car_capacity >= 2`、`passenger_count`が1〜3
-- `fare >= 0`および`earnings >= 0`（NULLの場合を除く）
+- `CHECK (fare IS NULL OR fare >= 0)`
+- `CHECK (earnings IS NULL OR earnings >= 0)`
 - Shiftの`start_time < end_time`
 - テーブル間の参照整合性
 
@@ -316,3 +324,4 @@ erDiagram
 - 実際に使用するGeocoding API
 - Supabase RPC / PostgreSQL Functionの具体形
 - status遷移をどこまでDBトリガーで補助するか
+- `canceled` Shiftを時間重複チェックの対象から除外するか
