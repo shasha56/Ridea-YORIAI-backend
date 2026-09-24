@@ -69,3 +69,50 @@
 ```
 
 `public.users`の作成に失敗した場合、作成直後のAuthユーザーを削除して不整合を補償する。Service Role Keyはサーバー専用の`SUPABASE_SERVICE_ROLE_KEY`から取得し、クライアントへ返さない。
+
+## ログイン
+
+`POST /api/auth/login`
+
+メールアドレスとパスワードをSupabase Authで検証し、後続APIのBearer認証とセッション更新に使用するトークンを返す。
+
+### リクエスト
+
+```json
+{
+  "email": "passenger@example.com",
+  "password": "password123"
+}
+```
+
+### 成功レスポンス
+
+`200 OK`
+
+```json
+{
+  "session": {
+    "access_token": "access-token",
+    "refresh_token": "refresh-token",
+    "expires_in": 3600,
+    "expires_at": 1790222400,
+    "token_type": "bearer"
+  },
+  "user": {
+    "id": "00000000-0000-0000-0000-000000000000",
+    "email": "passenger@example.com"
+  }
+}
+```
+
+後続APIでは`Authorization: Bearer <access_token>`ヘッダーを指定する。`refresh_token`はアクセストークン更新用としてフロントエンドで安全に管理する。
+
+### エラー
+
+- `400`: JSONとして不正
+- `401`: メールアドレスまたはパスワードが不正
+- `403`: メールアドレスが未確認
+- `422`: 入力値が不正
+- `500`: サーバー設定またはSupabase Authで予期しないエラーが発生
+
+ログイン処理ではService Role Keyを使用せず、サーバー専用の`SUPABASE_ANON_KEY`を使用する。
