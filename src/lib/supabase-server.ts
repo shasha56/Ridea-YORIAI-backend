@@ -5,9 +5,7 @@ export function createSupabaseServerClient(accessToken: string) {
   const anonKey = process.env.SUPABASE_ANON_KEY;
 
   if (!url || !anonKey) {
-    throw new Error(
-      "Supabase environment variables are not configured"
-    );
+    throw new Error("Supabase environment variables are not configured");
   }
 
   return createClient(url, anonKey, {

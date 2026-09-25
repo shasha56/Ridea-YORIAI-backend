@@ -1,106 +1,284 @@
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+export const runtime = "nodejs";
 
+// ==========================================
+// ★追加：CORS設定
+// フロント http://localhost:5173 からの通信を許可
+// ==========================================
 
-// ========================================
-// GET：ユーザーIDから名前・住所・電話番号を取得
-// ========================================
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "http://localhost:5173",
+  "Access-Control-Allow-Methods": "GET, PATCH, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
 
-  // URLからユーザーIDを取得
-  const userId = searchParams.get("id");
+// ==========================================
+// ★追加：OPTIONSリクエスト対応
+// ==========================================
 
-  // ユーザーIDがない場合
-  if (!userId) {
-    return Response.json(
-      { error: "ユーザーIDを入力してください" },
-      { status: 400 }
-    );
-  }
-
-  // Supabaseからユーザー情報を取得
-  const { data, error } = await supabase
-    .from("users")
-    .select("id, user_name, home_address, phone_number")
-    .eq("id", userId)
-    .single();
-
-  // エラーが発生した場合
-  if (error) {
-    return Response.json(
-      { error: error.message },
-      { status: 500 }
-    );
-  }
-
-  // 取得したデータを返す
-  return Response.json(data);
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
 }
 
+// ==========================================
+// エラーレスポンス
+// ★変更：CORSヘッダーを追加
+// ==========================================
 
-// ========================================
-// POST：名前・住所・電話番号を登録
-// ========================================
-export async function POST(request: Request) {
+function errorResponse(
+  status: number,
+  code: string,
+  message: string
+) {
+  return Response.json(
+    {
+      error: {
+        code,
+        message,
+      },
+    },
+    {
+      status,
+      headers: corsHeaders,
+    }
+  );
+}
+
+// ==========================================
+// Supabase接続
+// ==========================================
+
+function getSupabase() {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceRoleKey =
+    process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return null;
+  }
+
+  return createClient(
+    supabaseUrl,
+    serviceRoleKey,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  );
+}
+
+// ==========================================
+// 利用者情報取得
+// GET /api/users?id=UUID
+// ==========================================
+
+export async function GET(request: Request) {
   try {
-    // フロントから送られてきたデータを取得
+    const supabase = getSupabase();
+
+    if (!supabase) {
+      return errorResponse(
+        500,
+        "SERVER_CONFIGURATION_ERROR",
+        "Server configuration is invalid."
+      );
+    }
+
+    const { searchParams } =
+      new URL(request.url);
+
+    const userId =
+      searchParams.get("id");
+
+    if (!userId) {
+      return errorResponse(
+        400,
+        "USER_ID_REQUIRED",
+        "User ID is required."
+      );
+    }
+
+    const { data: user, error } =
+      await supabase
+        .from("users")
+        .select(`
+          id,
+          user_name,
+          phone_number,
+          profile_image_path,
+          address_postcode,
+          address,
+          role,
+          current_latitude,
+          current_longitude,
+          created_at,
+          updated_at
+        `)
+        .eq("id", userId)
+        .single();
+
+    if (error) {
+      console.error(
+        "User profile fetch failed:",
+        error.message
+      );
+
+      return errorResponse(
+        404,
+        "USER_NOT_FOUND",
+        "User was not found."
+      );
+    }
+
+    return Response.json(
+      {
+        user,
+      },
+      {
+        status: 200,
+
+        // ★追加
+        headers: corsHeaders,
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Unexpected user GET error:",
+      error
+    );
+
+    return errorResponse(
+      500,
+      "INTERNAL_SERVER_ERROR",
+      "Could not fetch the user."
+    );
+  }
+}
+
+// ==========================================
+// 利用者情報編集
+// PATCH /api/users
+// ==========================================
+
+export async function PATCH(request: Request) {
+  try {
+    const supabase = getSupabase();
+
+    if (!supabase) {
+      return errorResponse(
+        500,
+        "SERVER_CONFIGURATION_ERROR",
+        "Server configuration is invalid."
+      );
+    }
+
     const body = await request.json();
 
     const {
       id,
       user_name,
-      home_address,
-      phone_number
+      phone_number,
+      profile_image_path,
+      address_postcode,
+      address,
     } = body;
 
-    // 入力チェック
-    if (!id || !user_name || !home_address || !phone_number) {
-      return Response.json(
-        { error: "入力されていない項目があります" },
-        { status: 400 }
+    if (!id) {
+      return errorResponse(
+        400,
+        "USER_ID_REQUIRED",
+        "User ID is required."
       );
     }
 
-    // Supabaseのusersテーブルに登録
-    const { data, error } = await supabase
-      .from("users")
-      .insert([
-        {
+    const updates: Record<string, unknown> = {};
+
+    if (user_name !== undefined) {
+      updates.user_name = user_name;
+    }
+
+    if (phone_number !== undefined) {
+      updates.phone_number =
+        phone_number;
+    }
+
+    if (profile_image_path !== undefined) {
+      updates.profile_image_path =
+        profile_image_path;
+    }
+
+    if (address_postcode !== undefined) {
+      updates.address_postcode =
+        address_postcode;
+    }
+
+    if (address !== undefined) {
+      updates.address = address;
+    }
+
+    updates.updated_at =
+      new Date().toISOString();
+
+    const { data: updatedUser, error } =
+      await supabase
+        .from("users")
+        .update(updates)
+        .eq("id", id)
+        .select(`
           id,
           user_name,
-          home_address,
-          phone_number
-        }
-      ])
-      .select()
-      .single();
+          phone_number,
+          profile_image_path,
+          address_postcode,
+          address,
+          role,
+          current_latitude,
+          current_longitude,
+          created_at,
+          updated_at
+        `)
+        .single();
 
-    // Supabase側でエラーが発生した場合
     if (error) {
-      return Response.json(
-        { error: error.message },
-        { status: 500 }
+      console.error(
+        "User profile update failed:",
+        error.message
+      );
+
+      return errorResponse(
+        500,
+        "USER_UPDATE_FAILED",
+        "Could not update the user."
       );
     }
 
-    // 登録成功
     return Response.json(
       {
-        message: "ユーザー情報を登録しました",
-        user: data
+        user: updatedUser,
       },
-      { status: 201 }
+      {
+        status: 200,
+
+        // ★追加
+        headers: corsHeaders,
+      }
+    );
+  } catch (error) {
+    console.error(
+      "Unexpected user PATCH error:",
+      error
     );
 
-  } catch {
-    return Response.json(
-      { error: "リクエストの処理に失敗しました" },
-      { status: 500 }
+    return errorResponse(
+      500,
+      "INTERNAL_SERVER_ERROR",
+      "Could not update the user."
     );
   }
 }
