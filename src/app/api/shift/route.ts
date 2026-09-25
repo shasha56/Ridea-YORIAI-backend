@@ -1,3 +1,4 @@
+
 import { NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 
@@ -7,10 +8,38 @@ type ShiftInput = {
   car_id?: unknown;
 };
 
-const shiftColumns = "id, driver_id, car_id, start_time, end_time, status, created_at";
+type ValidatedShift = {
+  car_id: number;
+  start_time: string;
+  end_time: string;
+};
+
+type ValidationResult<T> =
+  | { value: T; error?: never }
+  | { error: string; value?: never };
+
+const shiftColumns =
+  "id, driver_id, car_id, start_time, end_time, status, created_at";
 
 function jsonError(message: string, status: number) {
   return NextResponse.json({ error: message }, { status });
+}
+
+function logDatabaseError(
+  operation: string,
+  error: {
+    code?: string;
+    message: string;
+    details?: string;
+    hint?: string;
+  }
+) {
+  console.error(`[Shift API] ${operation}`, {
+    code: error.code,
+    message: error.message,
+    details: error.details,
+    hint: error.hint,
+  });
 }
 
 function getAccessToken(request: Request) {
@@ -19,34 +48,72 @@ function getAccessToken(request: Request) {
   return match?.[1] ?? null;
 }
 
-function normalizePositiveInteger(value: unknown, fieldName: string) {
-  const normalized = typeof value === "string" ? Number(value) : value;
-  if (typeof normalized !== "number" || !Number.isInteger(normalized) || normalized <= 0) {
-    return { error: `${fieldName} must be a positive integer` } as const;
+function normalizePositiveInteger(
+  value: unknown,
+  fieldName: string
+): ValidationResult<number> {
+  const normalized =
+    typeof value === "string" ? Number(value) : value;
+
+  if (
+    typeof normalized !== "number" ||
+    !Number.isInteger(normalized) ||
+    normalized <= 0
+  ) {
+    return {
+      error: `${fieldName} must be a positive integer`,
+    };
   }
-  return { value: normalized } as const;
+
+  return { value: normalized };
 }
 
-function parseShiftInput(body: unknown) {
-  if (!body || typeof body !== "object") {
-    return { error: "Request body must be a JSON object" } as const;
+function parseShiftInput(
+  body: unknown
+): ValidationResult<ValidatedShift> {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return {
+      error: "Request body must be a JSON object",
+    };
   }
 
   const input = body as ShiftInput;
-  const carId = normalizePositiveInteger(input.car_id, "car_id");
-  if ("error" in carId) return carId;
 
-  if (typeof input.start_time !== "string" || typeof input.end_time !== "string") {
-    return { error: "start_time and end_time are required ISO date strings" } as const;
+  const carId = normalizePositiveInteger(
+    input.car_id,
+    "car_id"
+  );
+
+  if (carId.error !== undefined) {
+    return { error: carId.error };
+  }
+
+  if (
+    typeof input.start_time !== "string" ||
+    typeof input.end_time !== "string"
+  ) {
+    return {
+      error:
+        "start_time and end_time are required ISO date strings",
+    };
   }
 
   const startTime = new Date(input.start_time);
   const endTime = new Date(input.end_time);
-  if (Number.isNaN(startTime.getTime()) || Number.isNaN(endTime.getTime())) {
-    return { error: "start_time and end_time must be valid dates" } as const;
+
+  if (
+    Number.isNaN(startTime.getTime()) ||
+    Number.isNaN(endTime.getTime())
+  ) {
+    return {
+      error: "start_time and end_time must be valid dates",
+    };
   }
+
   if (startTime >= endTime) {
-    return { error: "start_time must be before end_time" } as const;
+    return {
+      error: "start_time must be before end_time",
+    };
   }
 
   return {
@@ -55,33 +122,56 @@ function parseShiftInput(body: unknown) {
       start_time: startTime.toISOString(),
       end_time: endTime.toISOString(),
     },
-  } as const;
+  };
 }
 
 function parseShiftId(request: Request) {
   const id = new URL(request.url).searchParams.get("id");
+
   if (!id || !/^\d+$/.test(id)) {
     return null;
   }
+
   return Number(id);
 }
 
 async function getDriverContext(request: Request) {
   const accessToken = getAccessToken(request);
+
   if (!accessToken) {
-    return { response: jsonError("Authentication is required", 401) } as const;
+    return {
+      response: jsonError("Authentication is required", 401),
+    } as const;
   }
 
   let supabase;
+
   try {
     supabase = createSupabaseServerClient(accessToken);
   } catch {
-    return { response: jsonError("Server configuration error", 500) } as const;
+    console.error(
+      "[Shift API] Failed to initialize Supabase client"
+    );
+
+    return {
+      response: jsonError("Server configuration error", 500),
+    } as const;
   }
 
-  const { data: userData, error: userError } = await supabase.auth.getUser(accessToken);
+  const { data: userData, error: userError } =
+    await supabase.auth.getUser(accessToken);
+
   if (userError || !userData.user) {
-    return { response: jsonError("Invalid access token", 401) } as const;
+    if (userError) {
+      console.error(
+        "[Shift API] Authentication failed:",
+        userError.message
+      );
+    }
+
+    return {
+      response: jsonError("Invalid access token", 401),
+    } as const;
   }
 
   const { data: driver, error: driverError } = await supabase
@@ -91,13 +181,32 @@ async function getDriverContext(request: Request) {
     .maybeSingle();
 
   if (driverError) {
-    return { response: jsonError("Failed to load driver profile", 500) } as const;
-  }
-  if (!driver) {
-    return { response: jsonError("Only registered drivers can manage shifts", 403) } as const;
+    logDatabaseError(
+      "Failed to load driver profile",
+      driverError
+    );
+
+    return {
+      response: jsonError(
+        "Failed to load driver profile",
+        500
+      ),
+    } as const;
   }
 
-  return { supabase, driverId: driver.id } as const;
+  if (!driver) {
+    return {
+      response: jsonError(
+        "Only registered drivers can manage shifts",
+        403
+      ),
+    } as const;
+  }
+
+  return {
+    supabase,
+    driverId: driver.id,
+  } as const;
 }
 
 async function hasOverlappingShift(
@@ -106,7 +215,7 @@ async function hasOverlappingShift(
   carId: number,
   startTime: string,
   endTime: string,
-  excludedShiftId?: number,
+  excludedShiftId?: number
 ) {
   let query = supabase
     .from("shifts")
@@ -122,12 +231,19 @@ async function hasOverlappingShift(
   }
 
   const { data, error } = await query;
-  return { overlaps: Boolean(data?.length), error };
+
+  return {
+    overlaps: Boolean(data?.length),
+    error,
+  };
 }
 
 export async function GET(request: Request) {
   const context = await getDriverContext(request);
-  if ("response" in context) return context.response;
+
+  if ("response" in context) {
+    return context.response;
+  }
 
   const { data, error } = await context.supabase
     .from("shifts")
@@ -135,15 +251,23 @@ export async function GET(request: Request) {
     .eq("driver_id", context.driverId)
     .order("start_time", { ascending: true });
 
-  if (error) return jsonError("Failed to load shifts", 500);
+  if (error) {
+    logDatabaseError("Failed to load shifts", error);
+    return jsonError("Failed to load shifts", 500);
+  }
+
   return NextResponse.json({ shifts: data });
 }
 
 export async function POST(request: Request) {
   const context = await getDriverContext(request);
-  if ("response" in context) return context.response;
+
+  if ("response" in context) {
+    return context.response;
+  }
 
   let body: unknown;
+
   try {
     body = await request.json();
   } catch {
@@ -151,17 +275,34 @@ export async function POST(request: Request) {
   }
 
   const parsed = parseShiftInput(body);
-  if ("error" in parsed) return jsonError(parsed.error, 400);
+
+  if (parsed.error !== undefined) {
+    return jsonError(parsed.error, 400);
+  }
 
   const overlap = await hasOverlappingShift(
     context.supabase,
     context.driverId,
     parsed.value.car_id,
     parsed.value.start_time,
-    parsed.value.end_time,
+    parsed.value.end_time
   );
-  if (overlap.error) return jsonError("Failed to check shift overlap", 500);
-  if (overlap.overlaps) return jsonError("Shift time overlaps an existing shift for the same driver or vehicle", 409);
+
+  if (overlap.error) {
+    logDatabaseError(
+      "Failed to check shift overlap",
+      overlap.error
+    );
+
+    return jsonError("Failed to check shift overlap", 500);
+  }
+
+  if (overlap.overlaps) {
+    return jsonError(
+      "Shift time overlaps an existing shift for the same driver or vehicle",
+      409
+    );
+  }
 
   const { data, error } = await context.supabase
     .from("shifts")
@@ -173,36 +314,69 @@ export async function POST(request: Request) {
     .select(shiftColumns)
     .single();
 
-  if (error) return jsonError("Failed to create shift", 500);
-  return NextResponse.json({ shift: data }, { status: 201 });
+  if (error) {
+    logDatabaseError("Failed to create shift", error);
+    return jsonError("Failed to create shift", 500);
+  }
+
+  return NextResponse.json(
+    { shift: data },
+    { status: 201 }
+  );
 }
 
 export async function PATCH(request: Request) {
   const context = await getDriverContext(request);
-  if ("response" in context) return context.response;
+
+  if ("response" in context) {
+    return context.response;
+  }
 
   const shiftId = parseShiftId(request);
-  if (shiftId === null) return jsonError("A numeric id query parameter is required", 400);
+
+  if (shiftId === null) {
+    return jsonError(
+      "A numeric id query parameter is required",
+      400
+    );
+  }
 
   let body: unknown;
+
   try {
     body = await request.json();
   } catch {
     return jsonError("Request body must be valid JSON", 400);
   }
-  const parsed = parseShiftInput(body);
-  if ("error" in parsed) return jsonError(parsed.error, 400);
 
-  const { data: shift, error: shiftError } = await context.supabase
-    .from("shifts")
-    .select("id, status")
-    .eq("id", shiftId)
-    .eq("driver_id", context.driverId)
-    .maybeSingle();
-  if (shiftError) return jsonError("Failed to load shift", 500);
-  if (!shift) return jsonError("Shift not found", 404);
+  const parsed = parseShiftInput(body);
+
+  if (parsed.error !== undefined) {
+    return jsonError(parsed.error, 400);
+  }
+
+  const { data: shift, error: shiftError } =
+    await context.supabase
+      .from("shifts")
+      .select("id, status")
+      .eq("id", shiftId)
+      .eq("driver_id", context.driverId)
+      .maybeSingle();
+
+  if (shiftError) {
+    logDatabaseError("Failed to load shift", shiftError);
+    return jsonError("Failed to load shift", 500);
+  }
+
+  if (!shift) {
+    return jsonError("Shift not found", 404);
+  }
+
   if (shift.status !== "available") {
-    return jsonError("Only available shifts can be changed", 409);
+    return jsonError(
+      "Only available shifts can be changed",
+      409
+    );
   }
 
   const overlap = await hasOverlappingShift(
@@ -211,10 +385,24 @@ export async function PATCH(request: Request) {
     parsed.value.car_id,
     parsed.value.start_time,
     parsed.value.end_time,
-    shiftId,
+    shiftId
   );
-  if (overlap.error) return jsonError("Failed to check shift overlap", 500);
-  if (overlap.overlaps) return jsonError("Shift time overlaps an existing shift for the same driver or vehicle", 409);
+
+  if (overlap.error) {
+    logDatabaseError(
+      "Failed to check shift overlap",
+      overlap.error
+    );
+
+    return jsonError("Failed to check shift overlap", 500);
+  }
+
+  if (overlap.overlaps) {
+    return jsonError(
+      "Shift time overlaps an existing shift for the same driver or vehicle",
+      409
+    );
+  }
 
   const { data, error } = await context.supabase
     .from("shifts")
@@ -223,27 +411,53 @@ export async function PATCH(request: Request) {
     .eq("driver_id", context.driverId)
     .select(shiftColumns)
     .single();
-  if (error) return jsonError("Failed to update shift", 500);
+
+  if (error) {
+    logDatabaseError("Failed to update shift", error);
+    return jsonError("Failed to update shift", 500);
+  }
+
   return NextResponse.json({ shift: data });
 }
 
 export async function DELETE(request: Request) {
   const context = await getDriverContext(request);
-  if ("response" in context) return context.response;
+
+  if ("response" in context) {
+    return context.response;
+  }
 
   const shiftId = parseShiftId(request);
-  if (shiftId === null) return jsonError("A numeric id query parameter is required", 400);
 
-  const { data: shift, error: shiftError } = await context.supabase
-    .from("shifts")
-    .select("id, status")
-    .eq("id", shiftId)
-    .eq("driver_id", context.driverId)
-    .maybeSingle();
-  if (shiftError) return jsonError("Failed to load shift", 500);
-  if (!shift) return jsonError("Shift not found", 404);
+  if (shiftId === null) {
+    return jsonError(
+      "A numeric id query parameter is required",
+      400
+    );
+  }
+
+  const { data: shift, error: shiftError } =
+    await context.supabase
+      .from("shifts")
+      .select("id, status")
+      .eq("id", shiftId)
+      .eq("driver_id", context.driverId)
+      .maybeSingle();
+
+  if (shiftError) {
+    logDatabaseError("Failed to load shift", shiftError);
+    return jsonError("Failed to load shift", 500);
+  }
+
+  if (!shift) {
+    return jsonError("Shift not found", 404);
+  }
+
   if (shift.status !== "available") {
-    return jsonError("Only available shifts can be canceled", 409);
+    return jsonError(
+      "Only available shifts can be canceled",
+      409
+    );
   }
 
   const { data, error } = await context.supabase
@@ -253,6 +467,11 @@ export async function DELETE(request: Request) {
     .eq("driver_id", context.driverId)
     .select(shiftColumns)
     .single();
-  if (error) return jsonError("Failed to cancel shift", 500);
+
+  if (error) {
+    logDatabaseError("Failed to cancel shift", error);
+    return jsonError("Failed to cancel shift", 500);
+  }
+
   return NextResponse.json({ shift: data });
 }
