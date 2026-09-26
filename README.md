@@ -38,6 +38,7 @@ SUPABASE_ANON_KEY=your-anon-or-publishable-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 MATCHING_CRON_SECRET=replace-with-a-random-secret
 SEED_USER_PASSWORD=replace-with-a-test-password
+CORS_ALLOWED_ORIGIN=http://localhost:5173
 ```
 
 | 変数 | 用途 |
@@ -47,6 +48,7 @@ SEED_USER_PASSWORD=replace-with-a-test-password
 | `SUPABASE_SERVICE_ROLE_KEY` | Auth Admin APIとバックエンド内部のDB操作 |
 | `MATCHING_CRON_SECRET` | Matching API専用Bearer Secret |
 | `SEED_USER_PASSWORD` | seedユーザー共通パスワード（8文字以上） |
+| `CORS_ALLOWED_ORIGIN` | APIアクセスを許可するフロントエンドのOrigin |
 
 Service Role KeyとMatching Secretはサーバー専用です。フロントエンド、`VITE_*`変数、Git管理対象ファイルへ公開しないでください。
 
@@ -239,7 +241,7 @@ const response = await fetch(
 );
 ```
 
-現在CORSヘッダーが明示されているのはUsers APIとDrivers APIだけです。他APIをVite開発サーバーから直接呼ぶ場合は、Viteのproxy設定またはバックエンド側の統一的なCORS対応が必要です。
+すべての`/api/*`レスポンスには共通CORSヘッダーが付与されます。許可元は`CORS_ALLOWED_ORIGIN`で設定し、未設定時は`http://localhost:5173`を使用します。設定変更後はNext.jsサーバーを再起動してください。
 
 ## Seed
 
@@ -273,5 +275,5 @@ npx supabase db lint --local --schema public --level error --fail-on error
 - Reservations APIとMatching APIは、現行Migrationにない`desired_arrival_at`や`trip_id`を参照しており、DBスキーマとの同期が必要です。
 - Unavailable Shift APIは現行Migrationと非互換です。
 - Matching APIは候補抽出のみで、割り当て処理は未実装です。
-- APIごとにエラー形式とCORS対応が統一されていません。
+- APIごとにエラー形式が統一されていません。
 - Hosted SupabaseへのMigration適用やseed投入は、対象Projectを確認して実行してください。

@@ -191,9 +191,12 @@ Service Role Keyはサーバー専用の `SUPABASE_SERVICE_ROLE_KEY` から取�
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+CORS_ALLOWED_ORIGIN=http://localhost:5173
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` はサーバー側でのみ使用し、フロントエンドには公開しない。
+
+`CORS_ALLOWED_ORIGIN`には、すべての`/api/*`へのアクセスを許可するフロントエンドのOriginを1件設定する。未設定時は`http://localhost:5173`を使用する。
 
 
 ---
