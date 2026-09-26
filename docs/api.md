@@ -194,3 +194,28 @@ SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` はサーバー側でのみ使用し、フロントエンドには公開しない。
+
+
+---
+
+## ログアウト
+
+`POST /api/auth/logout`
+
+現在のSupabase Authセッションを無効化する。リクエストボディは不要で、ログイン時に取得したアクセストークンをBearer形式で送る。
+
+```http
+POST /api/auth/logout
+Authorization: Bearer <access-token>
+```
+
+### 成功レスポンス
+
+`204 No Content`
+
+フロントエンドは成功後に保持しているアクセストークンとリフレッシュトークンを削除する。無効化済みセッションのアクセストークンは、有効期限に達するまで有効な場合がある。
+
+### エラー
+
+- `401`：Bearerトークンがない、形式が不正、またはトークンが無効
+- `500`：サーバー設定またはSupabase Authで予期しないエラーが発生
