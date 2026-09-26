@@ -3,30 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 export const runtime = "nodejs";
 
 // ==========================================
-// ★追加：CORS設定
-// フロント http://localhost:5173 からの通信を許可
-// ==========================================
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "http://localhost:5173",
-  "Access-Control-Allow-Methods": "GET, PATCH, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-};
-
-// ==========================================
-// ★追加：OPTIONSリクエスト対応
-// ==========================================
-
-export async function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: corsHeaders,
-  });
-}
-
-// ==========================================
 // エラーレスポンス
-// ★変更：CORSヘッダーを追加
 // ==========================================
 
 function errorResponse(
@@ -41,10 +18,7 @@ function errorResponse(
         message,
       },
     },
-    {
-      status,
-      headers: corsHeaders,
-    }
+    { status }
   );
 }
 
@@ -140,12 +114,7 @@ export async function GET(request: Request) {
       {
         user,
       },
-      {
-        status: 200,
-
-        // ★追加
-        headers: corsHeaders,
-      }
+      { status: 200 }
     );
   } catch (error) {
     console.error(
@@ -262,12 +231,7 @@ export async function PATCH(request: Request) {
       {
         user: updatedUser,
       },
-      {
-        status: 200,
-
-        // ★追加
-        headers: corsHeaders,
-      }
+      { status: 200 }
     );
   } catch (error) {
     console.error(
